@@ -22,6 +22,7 @@ downloads/
 """
 import os
 import re
+import time
 import yt_dlp
 from typing import Optional, Dict, Any, Callable, List
 from dataclasses import dataclass, field
@@ -31,6 +32,14 @@ import json
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# 限流保护配置
+RATE_LIMIT_CONFIG = {
+    'download_delay': 5,          # 每次下载前等待秒数
+    'retry_delay': 60,            # 被限流后等待秒数
+    'max_retries': 3,             # 最大重试次数
+    'rate_limit': '5M',           # 下载速度限制 (5MB/s)
+}
 
 
 class DownloadStatus(str, Enum):
@@ -104,22 +113,19 @@ class VideoDownloader:
                       download_playlist: bool = False) -> Dict[str, Any]:
         """获取 yt-dlp 配置"""
 
-        base_path = os.path.join(
+        # 使用 yt-dlp 支持的模板语法
+        # %(uploader,channel,Unknown)s 表示依次尝试 uploader, channel, 最后用 Unknown
+        output_template = os.path.join(
             self.download_dir,
-            '%(uploader|channel|Unknown)s',
-            '%(title)s'
+            '%(uploader,channel|Unknown)s',
+            '%(title).100s',
+            '%(title).100s.%(ext)s'
         )
 
         opts = {
             'format': format_preference,
-            # 视频输出路径
-            'outtmpl': {
-                'default': os.path.join(base_path, 'video.%(ext)s'),
-                'subtitle': os.path.join(base_path, 'subtitles', 'original.%(ext)s'),
-                'thumbnail': os.path.join(base_path, 'thumbnail.%(ext)s'),
-                'description': os.path.join(base_path, 'description.txt'),
-                'infojson': os.path.join(base_path, 'metadata.info.json'),
-            },
+            # 统一输出路径模板
+            'outtmpl': output_template,
             'noplaylist': not download_playlist,
             'quiet': False,
             'no_warnings': False,
@@ -134,15 +140,21 @@ class VideoDownloader:
             'writethumbnail': True,
             'writedescription': True,
             'writeinfojson': True,
-            # 网络设置
+            # 网络设置 - 防限流
             'socket_timeout': 30,
-            'retries': 3,
+            'retries': RATE_LIMIT_CONFIG['max_retries'],
+            'fragment_retries': RATE_LIMIT_CONFIG['max_retries'],
             'skip_unavailable_fragments': True,
+            'ratelimit': RATE_LIMIT_CONFIG['rate_limit'],  # 限速 5MB/s
+            'sleep_interval': 2,                            # 片段间隔 2 秒
+            'max_sleep_interval': 5,                        # 最大间隔 5 秒
             # 后处理 - 转换缩略图为 jpg
             'postprocessors': [{
                 'key': 'FFmpegThumbnailsConvertor',
                 'format': 'jpg',
             }],
+            # 继续下载未完成的文件
+            'continuedl': True,
         }
 
         if progress_callback:
@@ -208,6 +220,12 @@ class VideoDownloader:
                  download_playlist: bool = False,
                  max_videos: Optional[int] = None) -> Dict[str, Any]:
         """下载视频或播放列表"""
+
+        # 下载前延迟，防止请求过快
+        delay = RATE_LIMIT_CONFIG['download_delay']
+        logger.info(f"等待 {delay} 秒后开始下载...")
+        time.sleep(delay)
+
         opts = self._get_ydl_opts(progress_callback, format_preference, download_playlist)
 
         if max_videos and download_playlist:
@@ -296,7 +314,22 @@ class VideoDownloader:
 
         except yt_dlp.utils.DownloadError as e:
             error_msg = str(e)
-            if 'subtitles' in error_msg.lower() or '429' in error_msg:
+
+            # 检测限流错误
+            is_rate_limited = any(code in error_msg for code in ['403', '429', 'rate limit', 'too many requests'])
+
+            if is_rate_limited:
+                logger.warning(f"检测到限流，建议等待 {RATE_LIMIT_CONFIG['retry_delay']} 秒后重试")
+                return {
+                    'success': False,
+                    'error': '被限流，请稍后重试',
+                    'rate_limited': True,
+                    'retry_after': RATE_LIMIT_CONFIG['retry_delay'],
+                    'url': url,
+                }
+
+            # 字幕下载失败但视频成功的情况
+            if 'subtitles' in error_msg.lower():
                 if downloaded_files:
                     video_dir = os.path.dirname(downloaded_files[0]) if downloaded_files else None
                     return {
@@ -306,6 +339,7 @@ class VideoDownloader:
                         'video_dir': video_dir,
                         'warning': f'字幕下载失败: {error_msg}',
                     }
+
             logger.error(f"下载失败: {e}")
             return {
                 'success': False,

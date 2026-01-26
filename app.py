@@ -76,11 +76,16 @@ def create_progress_callback(task_id: str):
                 total = d.get('total_bytes') or d.get('total_bytes_estimate', 0)
                 downloaded = d.get('downloaded_bytes', 0)
                 if total > 0:
-                    tasks[task_id].progress = (downloaded / total) * 100
+                    progress = (downloaded / total) * 100
+                    # 只有视频文件才更新进度（排除字幕、缩略图等小文件）
+                    if total > 1024 * 1024:  # 大于 1MB 才认为是视频
+                        tasks[task_id].progress = min(progress, 99)  # 最高显示 99%，完成后才 100%
                 tasks[task_id].status = TaskStatus.DOWNLOADING
             elif d['status'] == 'finished':
-                tasks[task_id].progress = 100
-                tasks[task_id].filename = d.get('filename')
+                filename = d.get('filename', '')
+                # 只有视频文件完成才更新 filename
+                if filename.endswith(('.mp4', '.webm', '.mkv')):
+                    tasks[task_id].filename = filename
     return callback
 
 
