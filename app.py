@@ -1,0 +1,288 @@
+"""
+Video Downloader - FastAPI 应用
+基于 yt-dlp 的视频下载服务
+"""
+import os
+import uuid
+import asyncio
+from datetime import datetime
+from typing import Dict, Optional, Any
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+
+from models import (
+    DownloadRequest, BatchDownloadRequest, DownloadResponse,
+    TaskStatus, DownloadTask, TaskListResponse
+)
+from downloader import VideoDownloader
+
+# 配置
+DOWNLOAD_DIR = os.getenv("DOWNLOAD_DIR", "./downloads")
+HOST = os.getenv("HOST", "0.0.0.0")
+PORT = int(os.getenv("PORT", "8081"))
+
+# 全局任务存储 (生产环境应使用 Redis)
+tasks: Dict[str, DownloadTask] = {}
+
+# 下载器实例
+downloader = VideoDownloader(DOWNLOAD_DIR)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """应用生命周期"""
+    os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+    print(f"📁 下载目录: {os.path.abspath(DOWNLOAD_DIR)}")
+    print(f"🚀 Video Downloader 启动在 http://{HOST}:{PORT}")
+    print(f"🌐 Web UI: http://localhost:{PORT}/ui")
+    yield
+    print("👋 Video Downloader 关闭")
+
+
+app = FastAPI(
+    title="Video Downloader",
+    description="基于 yt-dlp 的视频下载服务",
+    version="1.0.0",
+    lifespan=lifespan
+)
+
+# CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# 静态文件服务 - 下载目录
+os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+app.mount("/files", StaticFiles(directory=DOWNLOAD_DIR), name="files")
+
+# 静态文件服务 - 前端 UI
+STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+if os.path.exists(STATIC_DIR):
+    app.mount("/ui", StaticFiles(directory=STATIC_DIR, html=True), name="static")
+
+
+def create_progress_callback(task_id: str):
+    """创建进度回调"""
+    def callback(d):
+        if task_id in tasks:
+            if d['status'] == 'downloading':
+                total = d.get('total_bytes') or d.get('total_bytes_estimate', 0)
+                downloaded = d.get('downloaded_bytes', 0)
+                if total > 0:
+                    tasks[task_id].progress = (downloaded / total) * 100
+                tasks[task_id].status = TaskStatus.DOWNLOADING
+            elif d['status'] == 'finished':
+                tasks[task_id].progress = 100
+                tasks[task_id].filename = d.get('filename')
+    return callback
+
+
+async def download_video_task(
+    task_id: str,
+    url: str,
+    format_pref: str,
+    download_playlist: bool = False,
+    max_videos: Optional[int] = None
+):
+    """后台下载任务"""
+    try:
+        tasks[task_id].status = TaskStatus.DOWNLOADING
+
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None,
+            lambda: downloader.download(
+                url,
+                progress_callback=create_progress_callback(task_id),
+                format_preference=format_pref,
+                download_playlist=download_playlist,
+                max_videos=max_videos
+            )
+        )
+
+        if result.get('success'):
+            tasks[task_id].status = TaskStatus.COMPLETED
+            tasks[task_id].title = result.get('title')
+            tasks[task_id].filename = result.get('filename')
+            tasks[task_id].type = result.get('type', 'video')
+            tasks[task_id].completed_at = datetime.now()
+
+            # 播放列表额外信息
+            if result.get('type') == 'playlist':
+                tasks[task_id].video_count = result.get('total', 0)
+
+            # 警告信息（如字幕下载失败）
+            if result.get('warning'):
+                tasks[task_id].warning = result.get('warning')
+        else:
+            tasks[task_id].status = TaskStatus.FAILED
+            tasks[task_id].error = result.get('error')
+
+    except Exception as e:
+        tasks[task_id].status = TaskStatus.FAILED
+        tasks[task_id].error = str(e)
+
+
+# ==================== API 端点 ====================
+
+@app.get("/")
+async def root():
+    """首页"""
+    return {
+        "name": "Video Downloader",
+        "version": "1.0.0",
+        "engine": "yt-dlp",
+        "download_dir": os.path.abspath(DOWNLOAD_DIR),
+        "ui": "/ui",
+        "endpoints": {
+            "info": "/api/info?url=VIDEO_URL",
+            "download": "POST /api/download",
+            "tasks": "/api/tasks",
+            "task": "/api/tasks/{task_id}",
+        }
+    }
+
+
+@app.get("/health")
+async def health():
+    """健康检查"""
+    return {"status": "ok"}
+
+
+@app.get("/api/info")
+async def get_video_info(url: str):
+    """获取视频/播放列表信息"""
+    try:
+        loop = asyncio.get_event_loop()
+        info = await loop.run_in_executor(
+            None,
+            lambda: downloader.get_video_info(url)
+        )
+        return info
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/download", response_model=DownloadResponse)
+async def create_download(request: DownloadRequest, background_tasks: BackgroundTasks):
+    """创建下载任务（支持单个视频、播放列表、频道）"""
+    task_id = str(uuid.uuid4())[:8]
+
+    task = DownloadTask(
+        id=task_id,
+        url=request.url,
+        status=TaskStatus.PENDING,
+        type="playlist" if request.download_playlist else "video",
+        created_at=datetime.now()
+    )
+    tasks[task_id] = task
+
+    background_tasks.add_task(
+        download_video_task,
+        task_id,
+        request.url,
+        request.format,
+        request.download_playlist,
+        request.max_videos
+    )
+
+    return DownloadResponse(
+        task_id=task_id,
+        status=TaskStatus.PENDING,
+        message="下载任务已创建" + ("（播放列表模式）" if request.download_playlist else "")
+    )
+
+
+@app.post("/api/download/batch")
+async def create_batch_download(request: BatchDownloadRequest, background_tasks: BackgroundTasks):
+    """批量下载"""
+    task_ids = []
+
+    for url in request.urls:
+        task_id = str(uuid.uuid4())[:8]
+        task = DownloadTask(
+            id=task_id,
+            url=url,
+            status=TaskStatus.PENDING,
+            created_at=datetime.now()
+        )
+        tasks[task_id] = task
+        task_ids.append(task_id)
+
+        background_tasks.add_task(
+            download_video_task,
+            task_id,
+            url,
+            request.format,
+            False,
+            None
+        )
+
+    return {
+        "task_ids": task_ids,
+        "total": len(task_ids),
+        "message": f"已创建 {len(task_ids)} 个下载任务"
+    }
+
+
+@app.get("/api/tasks", response_model=TaskListResponse)
+async def list_tasks(
+    status: Optional[TaskStatus] = None,
+    limit: int = 50,
+    offset: int = 0
+):
+    """获取任务列表"""
+    task_list = list(tasks.values())
+
+    if status:
+        task_list = [t for t in task_list if t.status == status]
+
+    task_list.sort(key=lambda t: t.created_at, reverse=True)
+
+    return TaskListResponse(
+        total=len(task_list),
+        tasks=task_list[offset:offset + limit]
+    )
+
+
+@app.get("/api/tasks/{task_id}", response_model=DownloadTask)
+async def get_task(task_id: str):
+    """获取任务详情"""
+    if task_id not in tasks:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    return tasks[task_id]
+
+
+@app.delete("/api/tasks/{task_id}")
+async def delete_task(task_id: str):
+    """删除任务"""
+    if task_id not in tasks:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    del tasks[task_id]
+    return {"message": "任务已删除"}
+
+
+@app.delete("/api/tasks")
+async def clear_completed_tasks():
+    """清除已完成的任务"""
+    to_delete = [
+        tid for tid, task in tasks.items()
+        if task.status in [TaskStatus.COMPLETED, TaskStatus.FAILED]
+    ]
+    for tid in to_delete:
+        del tasks[tid]
+    return {"message": f"已清除 {len(to_delete)} 个任务"}
+
+
+# ==================== 启动 ====================
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host=HOST, port=PORT)
