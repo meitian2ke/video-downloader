@@ -14,6 +14,13 @@ class TaskStatus(str, Enum):
     FAILED = "failed"
 
 
+class SortOrder(str, Enum):
+    """排序方式"""
+    NEWEST = "newest"      # 最新发布
+    OLDEST = "oldest"      # 最早发布
+    POPULAR = "popular"    # 最热门（播放量）
+
+
 class DownloadRequest(BaseModel):
     """下载请求"""
     url: str
@@ -22,6 +29,7 @@ class DownloadRequest(BaseModel):
     download_thumbnail: bool = True
     download_playlist: bool = False  # 是否下载整个播放列表/频道
     max_videos: Optional[int] = None  # 最多下载几个视频
+    sort_order: SortOrder = SortOrder.NEWEST  # 排序方式
 
 
 class BatchDownloadRequest(BaseModel):

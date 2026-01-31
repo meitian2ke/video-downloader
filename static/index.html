@@ -74,6 +74,16 @@
             color: #fff;
             font-size: 14px;
         }
+        select {
+            padding: 8px 12px;
+            border: 2px solid rgba(255,255,255,0.1);
+            border-radius: 8px;
+            background: rgba(0,0,0,0.3);
+            color: #fff;
+            font-size: 14px;
+            cursor: pointer;
+        }
+        select:focus { border-color: #e94560; outline: none; }
         .video-info {
             background: rgba(0,0,0,0.2);
             border-radius: 10px;
@@ -233,13 +243,17 @@
                 </div>
                 <div class="options-row">
                     <div class="option-item">
-                        <input type="checkbox" id="download-playlist" onchange="toggleMaxVideos()">
-                        <label for="download-playlist">播放列表/频道模式</label>
+                        <label>排序方式</label>
+                        <select id="sort-order">
+                            <option value="newest">最新发布</option>
+                            <option value="popular">最热门</option>
+                            <option value="oldest">最早发布</option>
+                        </select>
                     </div>
-                    <div class="option-item" id="max-videos-group" style="display:none;">
-                        <label>最多下载</label>
-                        <input type="number" id="max-videos" value="10" min="1" max="100">
-                        <label>个视频</label>
+                    <div class="option-item">
+                        <label>下载数量</label>
+                        <input type="number" id="max-videos" value="10" min="1" max="500">
+                        <label>个视频 (留空=全部)</label>
                     </div>
                 </div>
             </div>
@@ -297,11 +311,6 @@ https://www.youtube.com/playlist?list=zzz"></textarea>
             }
         }
 
-        function toggleMaxVideos() {
-            const checked = document.getElementById('download-playlist').checked;
-            document.getElementById('max-videos-group').style.display = checked ? 'flex' : 'none';
-        }
-
         function showMessage(text, type) {
             const msg = document.getElementById('message');
             msg.textContent = text;
@@ -335,9 +344,6 @@ https://www.youtube.com/playlist?list=zzz"></textarea>
                     document.getElementById('video-duration').style.display = 'none';
                     document.getElementById('video-count').style.display = 'block';
                     document.getElementById('video-count').textContent = `视频数: ${data.video_count}`;
-                    // 自动勾选播放列表模式
-                    document.getElementById('download-playlist').checked = true;
-                    toggleMaxVideos();
                 } else {
                     document.getElementById('type-badge').style.display = 'none';
                     document.getElementById('video-duration').style.display = 'block';
@@ -358,8 +364,10 @@ https://www.youtube.com/playlist?list=zzz"></textarea>
             const url = document.getElementById('url-input').value.trim();
             if (!url) { showMessage('请输入链接', 'error'); return; }
 
-            const isPlaylist = forcePlaylist || document.getElementById('download-playlist').checked;
-            const maxVideos = isPlaylist ? parseInt(document.getElementById('max-videos').value) || null : null;
+            // 数量限制始终生效（后端会自动检测是否是播放列表/频道）
+            const maxVideosInput = document.getElementById('max-videos').value;
+            const maxVideos = maxVideosInput ? parseInt(maxVideosInput) : null;
+            const sortOrder = document.getElementById('sort-order').value;
 
             const btn = forcePlaylist ? document.getElementById('playlist-btn') : document.getElementById('download-btn');
             btn.disabled = true;
@@ -372,8 +380,9 @@ https://www.youtube.com/playlist?list=zzz"></textarea>
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         url,
-                        download_playlist: isPlaylist,
-                        max_videos: maxVideos
+                        download_playlist: forcePlaylist,
+                        max_videos: maxVideos,
+                        sort_order: sortOrder
                     })
                 });
 
@@ -383,7 +392,7 @@ https://www.youtube.com/playlist?list=zzz"></textarea>
                 }
 
                 const data = await res.json();
-                showMessage(`下载任务已创建 (ID: ${data.task_id})${isPlaylist ? ' - 播放列表模式' : ''}`, 'success');
+                showMessage(`下载任务已创建 (ID: ${data.task_id})`, 'success');
                 document.getElementById('url-input').value = '';
                 document.getElementById('video-info').classList.remove('show');
                 refreshTasks();
@@ -426,6 +435,13 @@ https://www.youtube.com/playlist?list=zzz"></textarea>
                     list.innerHTML = '<div class="empty-state">暂无下载任务</div>';
                     return;
                 }
+
+                // 检查新完成的任务并通知
+                data.tasks.forEach(task => {
+                    if (task.status === 'completed') {
+                        notifyTaskComplete(task);
+                    }
+                });
 
                 list.innerHTML = data.tasks.map(task => `
                     <div class="task-item">
@@ -476,6 +492,39 @@ https://www.youtube.com/playlist?list=zzz"></textarea>
             return `${m}:${s.toString().padStart(2,'0')}`;
         }
 
+        // 通知功能
+        let notifiedTasks = new Set();
+
+        function requestNotificationPermission() {
+            if ('Notification' in window && Notification.permission === 'default') {
+                Notification.requestPermission();
+            }
+        }
+
+        function notifyTaskComplete(task) {
+            if (notifiedTasks.has(task.id)) return;
+            notifiedTasks.add(task.id);
+
+            // 页面内提示
+            showMessage(`下载完成: ${task.title || '视频'}`, 'success');
+
+            // 浏览器通知
+            if ('Notification' in window && Notification.permission === 'granted') {
+                new Notification('下载完成', {
+                    body: task.title || '视频下载完成',
+                    icon: '📥'
+                });
+            }
+
+            // 播放提示音
+            try {
+                const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdH2Onp6jnZiQgXVqYGBqeIqZpKuqpJuPgHJlXV1oc4OSnKOkoZqQgXRoYGBod4aVoKWlopyUhXdtZWVqdIKQm6GhoZyVi4B2bmtqcHuIlZ2hoaCcl5CIf3dycXR6hI+Yn6CfnZqWkIqEfnp5e3+GjpWbnp6dnJmWkoyIhIKBgoWJjpOXmZqamZiWk5CMinh0');
+                audio.volume = 0.3;
+                audio.play();
+            } catch(e) {}
+        }
+
+        requestNotificationPermission();
         refreshTasks();
         setInterval(refreshTasks, 3000);
     </script>

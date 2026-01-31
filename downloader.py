@@ -108,10 +108,16 @@ class VideoDownloader:
             'original.%(ext)s'
         )
 
+    def _is_playlist_url(self, url: str) -> bool:
+        """检测 URL 是否是播放列表/频道"""
+        patterns = ['/videos', '/playlist', '/playlists', '/shorts', '/@', '/c/', '/channel/', '/user/', 'list=']
+        return any(p in url for p in patterns)
+
     def _get_ydl_opts(self,
                       progress_callback: Optional[Callable] = None,
                       format_preference: str = "best",
-                      download_playlist: bool = False) -> Dict[str, Any]:
+                      download_playlist: bool = False,
+                      sort_order: str = "newest") -> Dict[str, Any]:
         """获取 yt-dlp 配置"""
 
         # 使用 yt-dlp 支持的模板语法
@@ -132,6 +138,8 @@ class VideoDownloader:
             'no_warnings': False,
             'extract_flat': False,
             'ignoreerrors': True,
+            # 播放列表排序
+            'playlist_items': None,  # 默认不限制
             # 字幕选项
             'writesubtitles': True,
             'writeautomaticsub': True,
@@ -160,6 +168,15 @@ class VideoDownloader:
 
         if progress_callback:
             opts['progress_hooks'] = [progress_callback]
+
+        # 播放列表排序配置
+        # YouTube 频道 /videos 页面默认按最新排序
+        # 如果需要按热门排序，需要修改 URL 或使用 playlistreverse
+        if sort_order == 'oldest':
+            opts['playlistreverse'] = True
+        elif sort_order == 'popular':
+            # 热门排序需要在 URL 中指定，这里记录日志提示
+            logger.info("热门排序：YouTube 频道需要使用 /videos?view=0&sort=p 参数")
 
         return opts
 
@@ -219,18 +236,35 @@ class VideoDownloader:
                  progress_callback: Optional[Callable] = None,
                  format_preference: str = "best",
                  download_playlist: bool = False,
-                 max_videos: Optional[int] = None) -> Dict[str, Any]:
+                 max_videos: Optional[int] = None,
+                 sort_order: str = "newest") -> Dict[str, Any]:
         """下载视频或播放列表"""
+
+        # 自动检测是否是播放列表/频道 URL
+        is_playlist_url = self._is_playlist_url(url)
+        if is_playlist_url:
+            download_playlist = True
+            logger.info(f"检测到频道/播放列表 URL，自动启用播放列表模式")
+
+        # 处理热门排序 - 修改 URL
+        if sort_order == 'popular' and '/videos' in url:
+            if '?' not in url:
+                url = url + '?view=0&sort=p'
+            elif 'sort=' not in url:
+                url = url + '&view=0&sort=p'
+            logger.info(f"热门排序，URL 已修改为: {url}")
 
         # 下载前延迟，防止请求过快
         delay = RATE_LIMIT_CONFIG['download_delay']
         logger.info(f"等待 {delay} 秒后开始下载...")
         time.sleep(delay)
 
-        opts = self._get_ydl_opts(progress_callback, format_preference, download_playlist)
+        opts = self._get_ydl_opts(progress_callback, format_preference, download_playlist, sort_order)
 
-        if max_videos and download_playlist:
+        # 限制下载数量（不再要求必须勾选播放列表模式）
+        if max_videos:
             opts['playlistend'] = max_videos
+            logger.info(f"限制下载数量: {max_videos} 个视频")
 
         downloaded_files = []
         downloaded_dirs = []

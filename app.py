@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 
 from models import (
     DownloadRequest, BatchDownloadRequest, DownloadResponse,
-    TaskStatus, DownloadTask, TaskListResponse
+    TaskStatus, DownloadTask, TaskListResponse, SortOrder
 )
 from downloader import VideoDownloader
 from cos_uploader import (
@@ -104,7 +104,8 @@ async def download_video_task(
     url: str,
     format_pref: str,
     download_playlist: bool = False,
-    max_videos: Optional[int] = None
+    max_videos: Optional[int] = None,
+    sort_order: str = "newest"
 ):
     """后台下载任务"""
     try:
@@ -118,7 +119,8 @@ async def download_video_task(
                 progress_callback=create_progress_callback(task_id),
                 format_preference=format_pref,
                 download_playlist=download_playlist,
-                max_videos=max_videos
+                max_videos=max_videos,
+                sort_order=sort_order
             )
         )
 
@@ -290,7 +292,8 @@ async def create_download(request: DownloadRequest, background_tasks: Background
         request.url,
         request.format,
         request.download_playlist,
-        request.max_videos
+        request.max_videos,
+        request.sort_order.value
     )
 
     return DownloadResponse(
