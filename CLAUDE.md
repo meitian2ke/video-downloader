@@ -28,8 +28,14 @@ git add . && git commit -m "feat: xxx" && git push origin main
 ```
 
 **CI/CD 配置**: `.github/workflows/deploy.yml`
-- 使用 SSH 连接服务器
-- 执行 `git pull` + `./run.sh build`
+1. SSH 连接腾讯云服务器
+2. `git pull origin main` 拉取最新代码
+3. `./run.sh build` 执行构建和部署
+
+**构建方案**: 服务器端 Docker build
+```
+git pull → docker-compose down → docker-compose build → docker-compose up
+```
 
 **服务器部署目录**: 由 `secrets.DEPLOY_PATH` 配置
 
