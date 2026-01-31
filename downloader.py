@@ -38,7 +38,7 @@ RATE_LIMIT_CONFIG = {
     'download_delay': 5,          # 每次下载前等待秒数
     'retry_delay': 60,            # 被限流后等待秒数
     'max_retries': 3,             # 最大重试次数
-    'rate_limit': '5M',           # 下载速度限制 (5MB/s)
+    'rate_limit': 5 * 1024 * 1024,  # 下载速度限制 5MB/s
 }
 
 
