@@ -69,6 +69,7 @@ class DownloadTask(BaseModel):
     warning: Optional[str] = None  # 部分成功的警告
     type: str = "video"  # video 或 playlist
     video_count: Optional[int] = None  # 播放列表视频数
+    cos_uploaded: bool = False  # 是否已上传到 COS
     created_at: datetime = datetime.now()
     completed_at: Optional[datetime] = None
 
