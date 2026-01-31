@@ -121,3 +121,4 @@ video-downloader/
 **决策**: DEC-0001
 **开发**: Claude Code
 **审查**: Codex
+# v1.0.0 - 2026-01-31
