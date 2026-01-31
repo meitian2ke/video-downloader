@@ -1,9 +1,10 @@
 """
-腾讯云 COS 上传模块
+腾讯云 COS 上传模块（带 Redis 缓存）
 """
 import os
 import logging
 from qcloud_cos import CosConfig, CosS3Client
+from cache import get_cos_cache, set_cos_cache, invalidate_cos_cache
 
 logger = logging.getLogger(__name__)
 
@@ -47,8 +48,15 @@ def upload_file(local_path: str, cos_key: str) -> dict:
         return {'success': False, 'error': str(e)}
 
 
-def list_videos(prefix: str = '', marker: str = '', max_keys: int = 100) -> dict:
-    """列出 COS 中的视频文件夹"""
+def list_videos(prefix: str = '', marker: str = '', max_keys: int = 100, use_cache: bool = True) -> dict:
+    """列出 COS 中的视频文件夹（带缓存）"""
+    # 尝试从缓存读取
+    if use_cache and not marker:  # 只缓存第一页
+        cached = get_cos_cache(prefix)
+        if cached:
+            logger.info(f"命中缓存: {prefix}")
+            return cached
+
     client = get_cos_client()
     if not client:
         return {'success': False, 'error': 'COS 未配置'}
@@ -85,13 +93,19 @@ def list_videos(prefix: str = '', marker: str = '', max_keys: int = 100) -> dict
                     'url': f"https://{COS_BUCKET}.cos.{COS_REGION}.myqcloud.com/{key}"
                 })
 
-        return {
+        result = {
             'success': True,
             'folders': folders,
             'files': files,
             'is_truncated': response.get('IsTruncated') == 'true',
             'next_marker': response.get('NextMarker', '')
         }
+
+        # 写入缓存（只缓存第一页）
+        if not marker:
+            set_cos_cache(prefix, result)
+
+        return result
     except Exception as e:
         logger.error(f"列出文件失败: {e}")
         return {'success': False, 'error': str(e)}
@@ -133,6 +147,9 @@ def delete_folder(prefix: str) -> dict:
             Delete={'Object': objects_to_delete, 'Quiet': 'true'}
         )
 
+        # 清除缓存
+        invalidate_cos_cache(prefix)
+
         return {
             'success': True,
             'deleted_count': len(objects_to_delete)
@@ -150,6 +167,9 @@ def delete_file(key: str) -> dict:
 
     try:
         client.delete_object(Bucket=COS_BUCKET, Key=key)
+        # 清除缓存（获取文件所在目录）
+        prefix = '/'.join(key.split('/')[:-1]) + '/' if '/' in key else ''
+        invalidate_cos_cache(prefix)
         return {'success': True, 'deleted': key}
     except Exception as e:
         logger.error(f"删除文件失败: {e}")
@@ -198,6 +218,12 @@ def upload_video_folder(video_dir: str, uploader: str, title: str) -> dict:
             })
 
     success_count = sum(1 for r in results if r.get('success'))
+
+    # 清除缓存
+    if success_count > 0:
+        invalidate_cos_cache(f"{uploader}/")
+        invalidate_cos_cache('')  # 根目录
+
     return {
         'success': success_count == len(results),
         'total': len(results),
