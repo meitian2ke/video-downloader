@@ -35,10 +35,11 @@ logger = logging.getLogger(__name__)
 
 # 限流保护配置
 RATE_LIMIT_CONFIG = {
-    'download_delay': 5,          # 每次下载前等待秒数
-    'retry_delay': 60,            # 被限流后等待秒数
-    'max_retries': 3,             # 最大重试次数
-    'rate_limit': 5 * 1024 * 1024,  # 下载速度限制 5MB/s
+    'download_delay': 3,          # 每次下载前等待秒数
+    'retry_delay': 30,            # 被限流后等待秒数
+    'max_retries': 10,            # 最大重试次数（增加到10次）
+    'fragment_retries': 10,       # 片段重试次数
+    'rate_limit': 0,              # 不限速，让代理决定速度
 }
 
 
