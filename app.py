@@ -18,7 +18,10 @@ from models import (
     TaskStatus, DownloadTask, TaskListResponse
 )
 from downloader import VideoDownloader
-from cos_uploader import upload_video_folder, get_cos_client
+from cos_uploader import (
+    upload_video_folder, get_cos_client, list_videos,
+    delete_folder, delete_file, get_file_url
+)
 
 # 配置
 DOWNLOAD_DIR = os.getenv("DOWNLOAD_DIR", "./downloads")
@@ -189,6 +192,46 @@ async def cos_status():
         "bucket": os.getenv('COS_BUCKET', ''),
         "region": os.getenv('COS_REGION', '')
     }
+
+
+@app.get("/api/cos/videos")
+async def list_cos_videos(prefix: str = '', marker: str = '', max_keys: int = 100):
+    """列出 COS 中的视频"""
+    result = list_videos(prefix, marker, max_keys)
+    if not result.get('success'):
+        raise HTTPException(status_code=500, detail=result.get('error'))
+    return result
+
+
+@app.delete("/api/cos/folder")
+async def delete_cos_folder(prefix: str):
+    """删除 COS 文件夹"""
+    if not prefix:
+        raise HTTPException(status_code=400, detail="prefix 不能为空")
+    result = delete_folder(prefix)
+    if not result.get('success'):
+        raise HTTPException(status_code=500, detail=result.get('error'))
+    return result
+
+
+@app.delete("/api/cos/file")
+async def delete_cos_file(key: str):
+    """删除 COS 单个文件"""
+    if not key:
+        raise HTTPException(status_code=400, detail="key 不能为空")
+    result = delete_file(key)
+    if not result.get('success'):
+        raise HTTPException(status_code=500, detail=result.get('error'))
+    return result
+
+
+@app.get("/api/cos/url")
+async def get_cos_url(key: str, expires: int = 3600):
+    """获取文件预签名 URL"""
+    result = get_file_url(key, expires)
+    if not result.get('success'):
+        raise HTTPException(status_code=500, detail=result.get('error'))
+    return result
 
 
 @app.post("/api/cos/upload/{task_id}")

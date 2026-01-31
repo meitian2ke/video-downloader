@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>视频管理 - COS</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #fff;
+            padding: 20px;
+        }
+        .container { max-width: 1200px; margin: 0 auto; }
+        header { text-align: center; padding: 30px 0; }
+        header h1 { font-size: 2rem; margin-bottom: 10px; }
+        header p { color: #888; }
+        .nav { display: flex; gap: 15px; justify-content: center; margin-bottom: 20px; }
+        .nav a {
+            color: #888;
+            text-decoration: none;
+            padding: 8px 16px;
+            border-radius: 8px;
+            background: rgba(255,255,255,0.05);
+            transition: all 0.2s;
+        }
+        .nav a:hover, .nav a.active { color: #e94560; background: rgba(233,69,96,0.2); }
+        .breadcrumb {
+            background: rgba(255,255,255,0.05);
+            padding: 15px 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .breadcrumb a { color: #e94560; text-decoration: none; }
+        .breadcrumb a:hover { text-decoration: underline; }
+        .breadcrumb span { color: #666; }
+        .content-box {
+            background: rgba(255,255,255,0.05);
+            border-radius: 16px;
+            padding: 20px;
+        }
+        .toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .toolbar-left { display: flex; gap: 10px; align-items: center; }
+        .item-count { color: #888; font-size: 14px; }
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            background: rgba(255,255,255,0.1);
+            color: #fff;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        button:hover { background: rgba(255,255,255,0.2); }
+        button.btn-danger { background: rgba(244,67,54,0.3); }
+        button.btn-danger:hover { background: rgba(244,67,54,0.5); }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 20px;
+        }
+        .card {
+            background: rgba(0,0,0,0.2);
+            border-radius: 12px;
+            overflow: hidden;
+            transition: transform 0.2s;
+            position: relative;
+        }
+        .card:hover { transform: translateY(-3px); }
+        .card-select {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 10;
+        }
+        .card-select input {
+            width: 20px;
+            height: 20px;
+            cursor: pointer;
+            accent-color: #e94560;
+        }
+        .card-thumb {
+            width: 100%;
+            height: 160px;
+            background: rgba(0,0,0,0.3);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #444;
+            font-size: 48px;
+            cursor: pointer;
+        }
+        .card-thumb img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .card-body { padding: 15px; }
+        .card-title {
+            font-weight: 600;
+            margin-bottom: 8px;
+            word-break: break-word;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+        .card-meta { font-size: 12px; color: #888; margin-bottom: 10px; }
+        .card-actions { display: flex; gap: 8px; }
+        .card-actions button { padding: 6px 12px; font-size: 12px; }
+        .file-item {
+            display: flex;
+            align-items: center;
+            padding: 15px;
+            background: rgba(0,0,0,0.2);
+            border-radius: 10px;
+            margin-bottom: 10px;
+            gap: 15px;
+        }
+        .file-item:hover { background: rgba(0,0,0,0.3); }
+        .file-icon { font-size: 24px; width: 40px; text-align: center; }
+        .file-info { flex: 1; min-width: 0; }
+        .file-name { font-weight: 500; word-break: break-all; }
+        .file-size { font-size: 12px; color: #888; margin-top: 4px; }
+        .file-actions { display: flex; gap: 8px; }
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #666;
+        }
+        .empty-state .icon { font-size: 64px; margin-bottom: 20px; }
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #888;
+        }
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.7);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+        .modal-overlay.show { display: flex; }
+        .modal {
+            background: #1a1a2e;
+            border-radius: 16px;
+            padding: 30px;
+            max-width: 500px;
+            width: 90%;
+        }
+        .modal h3 { margin-bottom: 15px; }
+        .modal p { color: #888; margin-bottom: 20px; }
+        .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
+        .video-player {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.95);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+        .video-player.show { display: flex; }
+        .video-player video { max-width: 90%; max-height: 90%; }
+        .video-player .close-btn {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            font-size: 30px;
+            cursor: pointer;
+            color: #fff;
+            background: none;
+            border: none;
+        }
+        .toast {
+            position: fixed;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 15px 25px;
+            border-radius: 10px;
+            background: rgba(76,175,80,0.9);
+            color: #fff;
+            display: none;
+            z-index: 1001;
+        }
+        .toast.show { display: block; }
+        .toast.error { background: rgba(244,67,54,0.9); }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>COS 视频管理</h1>
+            <p>管理已上传到腾讯云 COS 的视频文件</p>
+        </header>
+
+        <nav class="nav">
+            <a href="/ui">下载器</a>
+            <a href="/ui/manage.html" class="active">视频管理</a>
+        </nav>
+
+        <div class="breadcrumb" id="breadcrumb">
+            <a href="#" onclick="navigate('')">根目录</a>
+        </div>
+
+        <div class="content-box">
+            <div class="toolbar">
+                <div class="toolbar-left">
+                    <span class="item-count" id="item-count">加载中...</span>
+                    <button onclick="selectAll()" id="select-all-btn">全选</button>
+                </div>
+                <div>
+                    <button onclick="refresh()">刷新</button>
+                    <button class="btn-danger" onclick="deleteSelected()" id="delete-btn" disabled>删除选中</button>
+                </div>
+            </div>
+
+            <div id="content">
+                <div class="loading">加载中...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 删除确认弹窗 -->
+    <div class="modal-overlay" id="delete-modal">
+        <div class="modal">
+            <h3>确认删除</h3>
+            <p id="delete-message">确定要删除选中的项目吗？此操作不可恢复。</p>
+            <div class="modal-actions">
+                <button onclick="closeModal()">取消</button>
+                <button class="btn-danger" onclick="confirmDelete()">确认删除</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 视频播放器 -->
+    <div class="video-player" id="video-player">
+        <button class="close-btn" onclick="closePlayer()">&times;</button>
+        <video id="video" controls></video>
+    </div>
+
+    <!-- Toast 提示 -->
+    <div class="toast" id="toast"></div>
+
+    <script>
+        const API_BASE = '';
+        let currentPrefix = '';
+        let selectedItems = new Set();
+        let pendingDelete = null;
+
+        function navigate(prefix) {
+            currentPrefix = prefix;
+            selectedItems.clear();
+            updateDeleteButton();
+            loadContent();
+            updateBreadcrumb();
+            return false;
+        }
+
+        function updateBreadcrumb() {
+            const bc = document.getElementById('breadcrumb');
+            let html = '<a href="#" onclick="return navigate(\'\')">根目录</a>';
+
+            if (currentPrefix) {
+                const parts = currentPrefix.split('/').filter(p => p);
+                let path = '';
+                parts.forEach((part, i) => {
+                    path += part + '/';
+                    html += ` <span>/</span> `;
+                    if (i === parts.length - 1) {
+                        html += `<span style="color:#fff">${part}</span>`;
+                    } else {
+                        html += `<a href="#" onclick="return navigate('${path}')">${part}</a>`;
+                    }
+                });
+            }
+            bc.innerHTML = html;
+        }
+
+        async function loadContent() {
+            const content = document.getElementById('content');
+            content.innerHTML = '<div class="loading">加载中...</div>';
+
+            try {
+                const res = await fetch(`${API_BASE}/api/cos/videos?prefix=${encodeURIComponent(currentPrefix)}`);
+                if (!res.ok) throw new Error('加载失败');
+                const data = await res.json();
+
+                const folders = data.folders || [];
+                const files = data.files || [];
+                const total = folders.length + files.length;
+
+                document.getElementById('item-count').textContent =
+                    `${folders.length} 个文件夹, ${files.length} 个文件`;
+
+                if (total === 0) {
+                    content.innerHTML = `
+                        <div class="empty-state">
+                            <div class="icon">📁</div>
+                            <p>此目录为空</p>
+                        </div>
+                    `;
+                    return;
+                }
+
+                let html = '<div class="grid">';
+
+                // 文件夹
+                folders.forEach(folder => {
+                    html += `
+                        <div class="card" data-path="${folder.path}" data-type="folder">
+                            <div class="card-select">
+                                <input type="checkbox" onchange="toggleSelect('${folder.path}', 'folder')">
+                            </div>
+                            <div class="card-thumb" onclick="navigate('${folder.path}')">📁</div>
+                            <div class="card-body">
+                                <div class="card-title">${folder.name}</div>
+                                <div class="card-actions">
+                                    <button onclick="navigate('${folder.path}')">打开</button>
+                                    <button class="btn-danger" onclick="deleteSingle('${folder.path}', 'folder')">删除</button>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                });
+
+                // 文件
+                files.forEach(file => {
+                    const isVideo = /\.(mp4|webm|mkv|avi|mov)$/i.test(file.name);
+                    const isImage = /\.(jpg|jpeg|png|gif|webp)$/i.test(file.name);
+                    const icon = isVideo ? '🎬' : (isImage ? '🖼️' : '📄');
+                    const size = formatSize(file.size);
+
+                    html += `
+                        <div class="card" data-key="${file.key}" data-type="file">
+                            <div class="card-select">
+                                <input type="checkbox" onchange="toggleSelect('${file.key}', 'file')">
+                            </div>
+                            <div class="card-thumb" onclick="${isVideo ? `playVideo('${file.key}')` : `window.open('${file.url}')`}">
+                                ${isImage ? `<img src="${file.url}" alt="${file.name}">` : icon}
+                            </div>
+                            <div class="card-body">
+                                <div class="card-title">${file.name}</div>
+                                <div class="card-meta">${size}</div>
+                                <div class="card-actions">
+                                    ${isVideo ? `<button onclick="playVideo('${file.key}')">播放</button>` : ''}
+                                    <button onclick="copyUrl('${file.url}')">复制链接</button>
+                                    <button class="btn-danger" onclick="deleteSingle('${file.key}', 'file')">删除</button>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                });
+
+                html += '</div>';
+                content.innerHTML = html;
+
+            } catch (e) {
+                content.innerHTML = `
+                    <div class="empty-state">
+                        <div class="icon">❌</div>
+                        <p>加载失败: ${e.message}</p>
+                        <button onclick="loadContent()" style="margin-top:20px">重试</button>
+                    </div>
+                `;
+            }
+        }
+
+        function toggleSelect(id, type) {
+            const key = type + ':' + id;
+            if (selectedItems.has(key)) {
+                selectedItems.delete(key);
+            } else {
+                selectedItems.add(key);
+            }
+            updateDeleteButton();
+        }
+
+        function selectAll() {
+            const checkboxes = document.querySelectorAll('.card-select input');
+            const allSelected = selectedItems.size === checkboxes.length;
+
+            checkboxes.forEach(cb => {
+                cb.checked = !allSelected;
+                const card = cb.closest('.card');
+                const type = card.dataset.type;
+                const id = type === 'folder' ? card.dataset.path : card.dataset.key;
+                const key = type + ':' + id;
+
+                if (!allSelected) {
+                    selectedItems.add(key);
+                } else {
+                    selectedItems.delete(key);
+                }
+            });
+            updateDeleteButton();
+        }
+
+        function updateDeleteButton() {
+            const btn = document.getElementById('delete-btn');
+            btn.disabled = selectedItems.size === 0;
+            btn.textContent = selectedItems.size > 0 ? `删除选中 (${selectedItems.size})` : '删除选中';
+        }
+
+        function deleteSelected() {
+            if (selectedItems.size === 0) return;
+            pendingDelete = Array.from(selectedItems);
+            document.getElementById('delete-message').textContent =
+                `确定要删除选中的 ${selectedItems.size} 个项目吗？此操作不可恢复。`;
+            document.getElementById('delete-modal').classList.add('show');
+        }
+
+        function deleteSingle(id, type) {
+            pendingDelete = [type + ':' + id];
+            document.getElementById('delete-message').textContent =
+                `确定要删除此${type === 'folder' ? '文件夹' : '文件'}吗？此操作不可恢复。`;
+            document.getElementById('delete-modal').classList.add('show');
+        }
+
+        function closeModal() {
+            document.getElementById('delete-modal').classList.remove('show');
+            pendingDelete = null;
+        }
+
+        async function confirmDelete() {
+            if (!pendingDelete) return;
+            closeModal();
+
+            let successCount = 0;
+            for (const item of pendingDelete) {
+                const [type, id] = [item.split(':')[0], item.substring(item.indexOf(':') + 1)];
+                try {
+                    const endpoint = type === 'folder' ? '/api/cos/folder' : '/api/cos/file';
+                    const param = type === 'folder' ? 'prefix' : 'key';
+                    const res = await fetch(`${API_BASE}${endpoint}?${param}=${encodeURIComponent(id)}`, {
+                        method: 'DELETE'
+                    });
+                    if (res.ok) successCount++;
+                } catch (e) {
+                    console.error('删除失败:', e);
+                }
+            }
+
+            showToast(`成功删除 ${successCount} 个项目`);
+            selectedItems.clear();
+            updateDeleteButton();
+            loadContent();
+        }
+
+        async function playVideo(key) {
+            try {
+                const res = await fetch(`${API_BASE}/api/cos/url?key=${encodeURIComponent(key)}`);
+                if (!res.ok) throw new Error('获取播放地址失败');
+                const data = await res.json();
+
+                const video = document.getElementById('video');
+                video.src = data.url;
+                document.getElementById('video-player').classList.add('show');
+                video.play();
+            } catch (e) {
+                showToast('播放失败: ' + e.message, true);
+            }
+        }
+
+        function closePlayer() {
+            const video = document.getElementById('video');
+            video.pause();
+            video.src = '';
+            document.getElementById('video-player').classList.remove('show');
+        }
+
+        function copyUrl(url) {
+            navigator.clipboard.writeText(url).then(() => {
+                showToast('链接已复制');
+            }).catch(() => {
+                showToast('复制失败', true);
+            });
+        }
+
+        function refresh() {
+            loadContent();
+        }
+
+        function formatSize(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        function showToast(message, isError = false) {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.className = 'toast show' + (isError ? ' error' : '');
+            setTimeout(() => toast.classList.remove('show'), 3000);
+        }
+
+        // ESC 关闭播放器
+        document.addEventListener('keydown', e => {
+            if (e.key === 'Escape') {
+                closePlayer();
+                closeModal();
+            }
+        });
+
+        // 初始加载
+        loadContent();
+    </script>
+</body>
+</html>

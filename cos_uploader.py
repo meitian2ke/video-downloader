@@ -47,6 +47,134 @@ def upload_file(local_path: str, cos_key: str) -> dict:
         return {'success': False, 'error': str(e)}
 
 
+def list_videos(prefix: str = '', marker: str = '', max_keys: int = 100) -> dict:
+    """列出 COS 中的视频文件夹"""
+    client = get_cos_client()
+    if not client:
+        return {'success': False, 'error': 'COS 未配置'}
+
+    try:
+        response = client.list_objects(
+            Bucket=COS_BUCKET,
+            Prefix=prefix,
+            Delimiter='/',
+            Marker=marker,
+            MaxKeys=max_keys
+        )
+
+        # 获取文件夹（CommonPrefixes）
+        folders = []
+        for cp in response.get('CommonPrefixes', []):
+            folder_path = cp.get('Prefix', '')
+            if folder_path:
+                folders.append({
+                    'path': folder_path,
+                    'name': folder_path.rstrip('/').split('/')[-1]
+                })
+
+        # 获取文件
+        files = []
+        for item in response.get('Contents', []):
+            key = item.get('Key', '')
+            if key and not key.endswith('/'):
+                files.append({
+                    'key': key,
+                    'name': key.split('/')[-1],
+                    'size': item.get('Size', 0),
+                    'last_modified': item.get('LastModified', ''),
+                    'url': f"https://{COS_BUCKET}.cos.{COS_REGION}.myqcloud.com/{key}"
+                })
+
+        return {
+            'success': True,
+            'folders': folders,
+            'files': files,
+            'is_truncated': response.get('IsTruncated') == 'true',
+            'next_marker': response.get('NextMarker', '')
+        }
+    except Exception as e:
+        logger.error(f"列出文件失败: {e}")
+        return {'success': False, 'error': str(e)}
+
+
+def delete_folder(prefix: str) -> dict:
+    """删除 COS 中的文件夹及其所有内容"""
+    client = get_cos_client()
+    if not client:
+        return {'success': False, 'error': 'COS 未配置'}
+
+    try:
+        # 列出所有要删除的对象
+        objects_to_delete = []
+        marker = ''
+
+        while True:
+            response = client.list_objects(
+                Bucket=COS_BUCKET,
+                Prefix=prefix,
+                Marker=marker,
+                MaxKeys=1000
+            )
+
+            for item in response.get('Contents', []):
+                objects_to_delete.append({'Key': item['Key']})
+
+            if response.get('IsTruncated') == 'true':
+                marker = response.get('NextMarker', '')
+            else:
+                break
+
+        if not objects_to_delete:
+            return {'success': False, 'error': '文件夹为空或不存在'}
+
+        # 批量删除
+        delete_response = client.delete_objects(
+            Bucket=COS_BUCKET,
+            Delete={'Object': objects_to_delete, 'Quiet': 'true'}
+        )
+
+        return {
+            'success': True,
+            'deleted_count': len(objects_to_delete)
+        }
+    except Exception as e:
+        logger.error(f"删除文件夹失败: {e}")
+        return {'success': False, 'error': str(e)}
+
+
+def delete_file(key: str) -> dict:
+    """删除单个文件"""
+    client = get_cos_client()
+    if not client:
+        return {'success': False, 'error': 'COS 未配置'}
+
+    try:
+        client.delete_object(Bucket=COS_BUCKET, Key=key)
+        return {'success': True, 'deleted': key}
+    except Exception as e:
+        logger.error(f"删除文件失败: {e}")
+        return {'success': False, 'error': str(e)}
+
+
+def get_file_url(key: str, expires: int = 3600) -> dict:
+    """获取文件的预签名 URL"""
+    client = get_cos_client()
+    if not client:
+        return {'success': False, 'error': 'COS 未配置'}
+
+    try:
+        url = client.get_presigned_url(
+            Method='GET',
+            Bucket=COS_BUCKET,
+            Key=key,
+            Expired=expires
+        )
+        return {'success': True, 'url': url}
+    except Exception as e:
+        logger.error(f"获取URL失败: {e}")
+        return {'success': False, 'error': str(e)}
+
+
 def upload_video_folder(video_dir: str, uploader: str, title: str) -> dict:
     """上传整个视频文件夹到 COS"""
     client = get_cos_client()
