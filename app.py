@@ -18,6 +18,7 @@ from models import (
     TaskStatus, DownloadTask, TaskListResponse
 )
 from downloader import VideoDownloader
+from cos_uploader import upload_video_folder, get_cos_client
 
 # 配置
 DOWNLOAD_DIR = os.getenv("DOWNLOAD_DIR", "./downloads")
@@ -132,6 +133,18 @@ async def download_video_task(
             # 警告信息（如字幕下载失败）
             if result.get('warning'):
                 tasks[task_id].warning = result.get('warning')
+
+            # 自动上传到 COS
+            video_dir = result.get('video_dir')
+            if video_dir and get_cos_client():
+                uploader = result.get('uploader', 'Unknown')
+                title = result.get('title', 'unknown')
+                try:
+                    cos_result = upload_video_folder(video_dir, uploader, title)
+                    if cos_result.get('success'):
+                        tasks[task_id].cos_uploaded = True
+                except Exception as e:
+                    tasks[task_id].warning = f"COS上传失败: {e}"
         else:
             tasks[task_id].status = TaskStatus.FAILED
             tasks[task_id].error = result.get('error')
@@ -165,6 +178,39 @@ async def root():
 async def health():
     """健康检查"""
     return {"status": "ok"}
+
+
+@app.get("/api/cos/status")
+async def cos_status():
+    """检查 COS 配置状态"""
+    client = get_cos_client()
+    return {
+        "configured": client is not None,
+        "bucket": os.getenv('COS_BUCKET', ''),
+        "region": os.getenv('COS_REGION', '')
+    }
+
+
+@app.post("/api/cos/upload/{task_id}")
+async def upload_to_cos(task_id: str):
+    """上传已下载的视频到 COS"""
+    if task_id not in tasks:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    task = tasks[task_id]
+    if task.status != TaskStatus.COMPLETED:
+        raise HTTPException(status_code=400, detail="任务未完成")
+
+    # 查找视频目录
+    for root, dirs, files in os.walk(DOWNLOAD_DIR):
+        for d in dirs:
+            if task.title and task.title[:30] in d:
+                video_dir = os.path.join(root, d)
+                uploader = os.path.basename(root)
+                result = upload_video_folder(video_dir, uploader, d)
+                return result
+
+    raise HTTPException(status_code=404, detail="视频目录不存在")
 
 
 @app.get("/api/info")
