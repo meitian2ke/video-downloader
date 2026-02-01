@@ -17,7 +17,7 @@ from models import (
     DownloadRequest, BatchDownloadRequest, DownloadResponse,
     TaskStatus, DownloadTask, TaskListResponse, SortOrder
 )
-from downloader import VideoDownloader
+from downloader import VideoDownloader, detect_url_type, UrlType
 from cos_uploader import (
     upload_video_folder, get_cos_client, list_videos,
     delete_folder, delete_file, get_file_url
@@ -277,11 +277,14 @@ async def create_download(request: DownloadRequest, background_tasks: Background
     """创建下载任务（支持单个视频、播放列表、频道）"""
     task_id = str(uuid.uuid4())[:8]
 
+    # 检测 URL 类型
+    url_type = detect_url_type(request.url)
+
     task = DownloadTask(
         id=task_id,
         url=request.url,
         status=TaskStatus.PENDING,
-        type="playlist" if request.download_playlist else "video",
+        type=url_type.value,  # 使用检测到的类型：video/channel/playlist
         created_at=datetime.now()
     )
     tasks[task_id] = task
@@ -296,10 +299,16 @@ async def create_download(request: DownloadRequest, background_tasks: Background
         request.sort_order.value
     )
 
+    type_msg = {
+        'video': '',
+        'channel': '（频道模式）',
+        'playlist': '（播放列表模式）'
+    }
+
     return DownloadResponse(
         task_id=task_id,
         status=TaskStatus.PENDING,
-        message="下载任务已创建" + ("（播放列表模式）" if request.download_playlist else "")
+        message="下载任务已创建" + type_msg.get(url_type.value, '')
     )
 
 

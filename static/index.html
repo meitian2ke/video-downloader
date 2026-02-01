@@ -236,10 +236,8 @@
 
             <div id="single-input">
                 <div class="input-group">
-                    <input type="text" id="url-input" placeholder="粘贴链接：视频、播放列表、频道主页均可">
-                    <button onclick="getInfo()" id="info-btn">获取信息</button>
-                    <button onclick="download(false)" id="download-btn">下载视频</button>
-                    <button onclick="download(true)" id="playlist-btn" class="btn-playlist">下载全部</button>
+                    <input type="text" id="url-input" placeholder="粘贴链接：视频、频道视频页面（@用户名/videos）均可">
+                    <button onclick="download()" id="download-btn">下载</button>
                 </div>
                 <div class="options-row">
                     <div class="option-item">
@@ -253,7 +251,7 @@
                     <div class="option-item">
                         <label>下载数量</label>
                         <input type="number" id="max-videos" value="10" min="1" max="500">
-                        <label>个视频 (留空=全部)</label>
+                        <label>个视频（频道模式生效，支持去重）</label>
                     </div>
                 </div>
             </div>
@@ -269,16 +267,6 @@ https://www.youtube.com/playlist?list=zzz"></textarea>
             </div>
 
             <div class="message" id="message"></div>
-
-            <div class="video-info" id="video-info">
-                <h3>
-                    <span id="video-title">标题</span>
-                    <span class="playlist-badge" id="type-badge" style="display:none;">播放列表</span>
-                </h3>
-                <p id="video-duration">时长: --</p>
-                <p id="video-uploader">上传者: --</p>
-                <p id="video-count" style="display:none;">视频数: --</p>
-            </div>
         </div>
 
         <div class="tasks-section">
@@ -360,18 +348,16 @@ https://www.youtube.com/playlist?list=zzz"></textarea>
             }
         }
 
-        async function download(forcePlaylist = false) {
+        async function download() {
             const url = document.getElementById('url-input').value.trim();
             if (!url) { showMessage('请输入链接', 'error'); return; }
 
-            // 数量限制始终生效（后端会自动检测是否是播放列表/频道）
             const maxVideosInput = document.getElementById('max-videos').value;
             const maxVideos = maxVideosInput ? parseInt(maxVideosInput) : null;
             const sortOrder = document.getElementById('sort-order').value;
 
-            const btn = forcePlaylist ? document.getElementById('playlist-btn') : document.getElementById('download-btn');
+            const btn = document.getElementById('download-btn');
             btn.disabled = true;
-            const originalText = btn.textContent;
             btn.textContent = '提交中...';
 
             try {
@@ -380,7 +366,6 @@ https://www.youtube.com/playlist?list=zzz"></textarea>
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         url,
-                        download_playlist: forcePlaylist,
                         max_videos: maxVideos,
                         sort_order: sortOrder
                     })
@@ -394,13 +379,12 @@ https://www.youtube.com/playlist?list=zzz"></textarea>
                 const data = await res.json();
                 showMessage(`下载任务已创建 (ID: ${data.task_id})`, 'success');
                 document.getElementById('url-input').value = '';
-                document.getElementById('video-info').classList.remove('show');
                 refreshTasks();
             } catch (e) {
                 showMessage('提交失败: ' + e.message, 'error');
             } finally {
                 btn.disabled = false;
-                btn.textContent = originalText;
+                btn.textContent = '下载';
             }
         }
 
@@ -448,6 +432,7 @@ https://www.youtube.com/playlist?list=zzz"></textarea>
                         <div class="task-info">
                             <div class="task-title">
                                 ${task.title || '获取中...'}
+                                ${task.type === 'channel' ? `<span class="task-type-badge" style="background:rgba(33,150,243,0.3);color:#2196f3;">频道${task.video_count ? ' · ' + task.video_count + '个' : ''}</span>` : ''}
                                 ${task.type === 'playlist' ? `<span class="task-type-badge">播放列表${task.video_count ? ' · ' + task.video_count + '个' : ''}</span>` : ''}
                             </div>
                             <div class="task-url">${task.url}</div>

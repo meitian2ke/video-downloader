@@ -19,12 +19,16 @@ downloads/
 │   │   │   └── tts.zh.mp3          # TTS配音 (后续处理)
 │   │   └── output/
 │   │       └── final.zh.mp4        # 最终母语视频 (后续处理)
+
+去重记录:
+downloads/
+├── .downloaded_videos.json     # 已下载视频 ID 记录
 """
 import os
 import re
 import time
 import yt_dlp
-from typing import Optional, Dict, Any, Callable, List
+from typing import Optional, Dict, Any, Callable, List, Set
 from dataclasses import dataclass, field
 from enum import Enum
 import logging
@@ -79,12 +83,60 @@ def sanitize_filename(name: str, max_length: int = 100) -> str:
     return name or "unknown"
 
 
+class UrlType(str, Enum):
+    """URL 类型"""
+    VIDEO = "video"           # 单个视频
+    CHANNEL = "channel"       # 频道视频页面 (@用户名/videos)
+    PLAYLIST = "playlist"     # 播放列表
+
+
+def detect_url_type(url: str) -> UrlType:
+    """检测 URL 类型"""
+    # 频道视频页面: /@用户名/videos 或 /c/频道名/videos 或 /channel/xxx/videos
+    if '/videos' in url and ('/@' in url or '/c/' in url or '/channel/' in url):
+        return UrlType.CHANNEL
+    # 播放列表
+    if 'list=' in url or '/playlist' in url:
+        return UrlType.PLAYLIST
+    # 频道主页（没有 /videos）
+    if '/@' in url or '/c/' in url or '/channel/' in url or '/user/' in url:
+        return UrlType.CHANNEL
+    # 默认单个视频
+    return UrlType.VIDEO
+
+
 class VideoDownloader:
     """视频下载器 - 基于 yt-dlp"""
 
     def __init__(self, download_dir: str = "./downloads"):
         self.download_dir = download_dir
         os.makedirs(download_dir, exist_ok=True)
+        self.downloaded_record_file = os.path.join(download_dir, '.downloaded_videos.json')
+
+    def _load_downloaded_ids(self) -> Set[str]:
+        """加载已下载的视频 ID 列表"""
+        if os.path.exists(self.downloaded_record_file):
+            try:
+                with open(self.downloaded_record_file, 'r') as f:
+                    data = json.load(f)
+                    return set(data.get('video_ids', []))
+            except Exception as e:
+                logger.warning(f"加载已下载记录失败: {e}")
+        return set()
+
+    def _save_downloaded_id(self, video_id: str):
+        """保存已下载的视频 ID"""
+        ids = self._load_downloaded_ids()
+        ids.add(video_id)
+        try:
+            with open(self.downloaded_record_file, 'w') as f:
+                json.dump({'video_ids': list(ids)}, f, indent=2)
+        except Exception as e:
+            logger.warning(f"保存已下载记录失败: {e}")
+
+    def _is_video_downloaded(self, video_id: str) -> bool:
+        """检查视频是否已下载"""
+        return video_id in self._load_downloaded_ids()
 
     def _get_output_template(self) -> str:
         """
@@ -238,13 +290,15 @@ class VideoDownloader:
                  download_playlist: bool = False,
                  max_videos: Optional[int] = None,
                  sort_order: str = "newest") -> Dict[str, Any]:
-        """下载视频或播放列表"""
+        """下载视频或频道视频（支持去重）"""
 
-        # 自动检测是否是播放列表/频道 URL
-        is_playlist_url = self._is_playlist_url(url)
-        if is_playlist_url:
+        # 检测 URL 类型
+        url_type = detect_url_type(url)
+        logger.info(f"URL 类型: {url_type.value}")
+
+        # 频道或播放列表自动启用多视频模式
+        if url_type in (UrlType.CHANNEL, UrlType.PLAYLIST):
             download_playlist = True
-            logger.info(f"检测到频道/播放列表 URL，自动启用播放列表模式")
 
         # 处理热门排序 - 修改 URL
         if sort_order == 'popular' and '/videos' in url:
@@ -259,6 +313,14 @@ class VideoDownloader:
         logger.info(f"等待 {delay} 秒后开始下载...")
         time.sleep(delay)
 
+        # 频道/播放列表模式：先获取列表，去重后逐个下载
+        if url_type in (UrlType.CHANNEL, UrlType.PLAYLIST) and max_videos:
+            return self._download_channel_with_dedup(
+                url, url_type, max_videos, sort_order,
+                progress_callback, format_preference
+            )
+
+        # 单个视频或不限数量的下载
         opts = self._get_ydl_opts(progress_callback, format_preference, download_playlist, sort_order)
 
         # 限制下载数量（不再要求必须勾选播放列表模式）
@@ -295,11 +357,16 @@ class VideoDownloader:
                         'url': url,
                     }
 
-                # 处理播放列表
+                # 处理播放列表/频道
                 if 'entries' in info:
                     results = []
                     for entry in info['entries']:
                         if entry:
+                            video_id = entry.get('id')
+                            # 记录已下载的视频 ID
+                            if video_id:
+                                self._save_downloaded_id(video_id)
+
                             uploader = sanitize_filename(
                                 entry.get('uploader') or entry.get('channel') or 'Unknown'
                             )
@@ -307,7 +374,7 @@ class VideoDownloader:
                             video_dir = os.path.join(self.download_dir, uploader, title)
 
                             results.append({
-                                'id': entry.get('id'),
+                                'id': video_id,
                                 'title': entry.get('title'),
                                 'uploader': uploader,
                                 'video_dir': video_dir,
@@ -315,7 +382,7 @@ class VideoDownloader:
 
                     return {
                         'success': True,
-                        'type': 'playlist',
+                        'type': url_type.value,  # 使用检测到的类型
                         'title': info.get('title'),
                         'uploader': info.get('uploader') or info.get('channel'),
                         'total': len(results),
@@ -324,6 +391,11 @@ class VideoDownloader:
                     }
                 else:
                     # 单个视频
+                    video_id = info.get('id')
+                    # 记录已下载的视频 ID
+                    if video_id:
+                        self._save_downloaded_id(video_id)
+
                     uploader = sanitize_filename(
                         info.get('uploader') or info.get('channel') or 'Unknown'
                     )
@@ -440,6 +512,152 @@ class VideoDownloader:
         status_file = os.path.join(video_dir, 'status.json')
         with open(status_file, 'w', encoding='utf-8') as f:
             json.dump(status, f, ensure_ascii=False, indent=2)
+
+    def _download_channel_with_dedup(
+        self,
+        url: str,
+        url_type: UrlType,
+        max_videos: int,
+        sort_order: str,
+        progress_callback: Optional[Callable],
+        format_preference: str
+    ) -> Dict[str, Any]:
+        """频道/播放列表去重下载"""
+        logger.info(f"开始去重下载，目标数量: {max_videos}")
+
+        # 第一步：获取视频列表（不下载）
+        list_opts = {
+            'quiet': True,
+            'no_warnings': True,
+            'extract_flat': True,  # 只获取列表，不解析每个视频
+            'ignoreerrors': True,
+        }
+
+        # 处理排序
+        if sort_order == 'oldest':
+            list_opts['playlistreverse'] = True
+
+        try:
+            with yt_dlp.YoutubeDL(list_opts) as ydl:
+                logger.info("获取频道视频列表...")
+                info = ydl.extract_info(url, download=False)
+
+                if not info or 'entries' not in info:
+                    return {
+                        'success': False,
+                        'error': '无法获取视频列表',
+                        'url': url,
+                    }
+
+                entries = list(info.get('entries', []))
+                logger.info(f"频道共有 {len(entries)} 个视频")
+
+        except Exception as e:
+            logger.error(f"获取视频列表失败: {e}")
+            return {'success': False, 'error': str(e), 'url': url}
+
+        # 第二步：过滤已下载的视频
+        downloaded_ids = self._load_downloaded_ids()
+        videos_to_download = []
+
+        for entry in entries:
+            if not entry:
+                continue
+            video_id = entry.get('id')
+            if video_id and video_id not in downloaded_ids:
+                videos_to_download.append(entry)
+            if len(videos_to_download) >= max_videos:
+                break
+
+        skipped = len(entries) - len(videos_to_download)
+        if skipped > 0:
+            logger.info(f"跳过 {skipped} 个已下载的视频")
+
+        if not videos_to_download:
+            return {
+                'success': True,
+                'type': url_type.value,
+                'title': info.get('title'),
+                'uploader': info.get('uploader') or info.get('channel'),
+                'total': 0,
+                'skipped': skipped,
+                'message': '所有视频都已下载过',
+                'videos': [],
+            }
+
+        logger.info(f"将下载 {len(videos_to_download)} 个新视频")
+
+        # 第三步：逐个下载
+        results = []
+        for i, entry in enumerate(videos_to_download):
+            video_id = entry.get('id')
+            video_url = entry.get('url') or f"https://www.youtube.com/watch?v={video_id}"
+            logger.info(f"下载 [{i+1}/{len(videos_to_download)}]: {entry.get('title', video_id)}")
+
+            # 下载单个视频
+            result = self._download_single_video(
+                video_url, progress_callback, format_preference
+            )
+
+            if result.get('success'):
+                self._save_downloaded_id(video_id)
+                results.append({
+                    'id': video_id,
+                    'title': result.get('title'),
+                    'uploader': result.get('uploader'),
+                    'video_dir': result.get('video_dir'),
+                })
+
+            # 下载间隔
+            if i < len(videos_to_download) - 1:
+                time.sleep(RATE_LIMIT_CONFIG['download_delay'])
+
+        return {
+            'success': True,
+            'type': url_type.value,
+            'title': info.get('title'),
+            'uploader': info.get('uploader') or info.get('channel'),
+            'total': len(results),
+            'skipped': skipped,
+            'videos': results,
+            'download_dir': self.download_dir,
+        }
+
+    def _download_single_video(
+        self,
+        url: str,
+        progress_callback: Optional[Callable],
+        format_preference: str
+    ) -> Dict[str, Any]:
+        """下载单个视频"""
+        opts = self._get_ydl_opts(progress_callback, format_preference, False, "newest")
+
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+
+                if not info:
+                    return {'success': False, 'error': '下载失败'}
+
+                uploader = sanitize_filename(
+                    info.get('uploader') or info.get('channel') or 'Unknown'
+                )
+                title = sanitize_filename(info.get('title') or 'unknown')
+                video_dir = os.path.join(self.download_dir, uploader, title)
+
+                self._ensure_processing_dirs(video_dir)
+                self._write_status_file(video_dir, info)
+
+                return {
+                    'success': True,
+                    'id': info.get('id'),
+                    'title': info.get('title'),
+                    'uploader': uploader,
+                    'video_dir': video_dir,
+                }
+        except Exception as e:
+            logger.error(f"下载单个视频失败: {e}")
+            return {'success': False, 'error': str(e)}
 
     def download_channel(self,
                          url: str,
