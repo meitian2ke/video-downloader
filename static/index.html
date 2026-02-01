@@ -221,6 +221,9 @@
         <header>
             <h1>📥 Video Downloader</h1>
             <p>基于 yt-dlp · 支持 YouTube 视频、播放列表、频道</p>
+            <div id="version-info" style="margin-top:10px;font-size:12px;color:#666;">
+                版本: 加载中...
+            </div>
         </header>
 
         <nav style="display:flex;gap:15px;justify-content:center;margin-bottom:20px;">
@@ -511,7 +514,20 @@ https://www.youtube.com/playlist?list=zzz"></textarea>
 
         requestNotificationPermission();
         refreshTasks();
+        loadVersion();
         setInterval(refreshTasks, 3000);
+
+        // 获取版本信息
+        async function loadVersion() {
+            try {
+                const res = await fetch(`${API_BASE}/api/version`);
+                const data = await res.json();
+                document.getElementById('version-info').innerHTML =
+                    `版本: <span style="color:#e94560">${data.version}</span> | 构建: ${data.build_time}`;
+            } catch (e) {
+                document.getElementById('version-info').textContent = '版本: 获取失败';
+            }
+        }
     </script>
 </body>
 </html>

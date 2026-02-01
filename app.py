@@ -9,6 +9,10 @@ from datetime import datetime
 from typing import Dict, Optional, Any
 from contextlib import asynccontextmanager
 
+# 版本信息 - 每次更新代码时修改这里
+APP_VERSION = "1.1.0"
+BUILD_TIME = "2026-02-01 12:00"
+
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -166,7 +170,8 @@ async def root():
     """首页"""
     return {
         "name": "Video Downloader",
-        "version": "1.0.0",
+        "version": APP_VERSION,
+        "build_time": BUILD_TIME,
         "engine": "yt-dlp",
         "download_dir": os.path.abspath(DOWNLOAD_DIR),
         "ui": "/ui",
@@ -175,7 +180,18 @@ async def root():
             "download": "POST /api/download",
             "tasks": "/api/tasks",
             "task": "/api/tasks/{task_id}",
+            "version": "/api/version",
         }
+    }
+
+
+@app.get("/api/version")
+async def get_version():
+    """获取版本信息 - 用于确认代码是否更新"""
+    return {
+        "version": APP_VERSION,
+        "build_time": BUILD_TIME,
+        "server_time": datetime.now().isoformat()
     }
 
 
