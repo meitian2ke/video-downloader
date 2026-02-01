@@ -559,19 +559,33 @@ class VideoDownloader:
         # 第二步：过滤已下载的视频
         downloaded_ids = self._load_downloaded_ids()
         videos_to_download = []
+        skipped_downloaded = 0
+        skipped_non_video = 0
 
         for entry in entries:
             if not entry:
                 continue
-            video_id = entry.get('id')
-            if video_id and video_id not in downloaded_ids:
-                videos_to_download.append(entry)
+
+            video_id = entry.get('id') or ''
+            url = entry.get('url') or ''
+
+            # 仅保留 YouTube 视频条目，过滤掉频道/播放列表条目
+            if len(video_id) != 11 or 'playlist?' in url:
+                skipped_non_video += 1
+                continue
+
+            if video_id in downloaded_ids:
+                skipped_downloaded += 1
+                continue
+
+            videos_to_download.append(entry)
             if len(videos_to_download) >= max_videos:
                 break
 
-        skipped = len(entries) - len(videos_to_download)
-        if skipped > 0:
-            logger.info(f"跳过 {skipped} 个已下载的视频")
+        if skipped_non_video:
+            logger.info(f"过滤掉 {skipped_non_video} 个非视频条目（频道/播放列表等）")
+        if skipped_downloaded:
+            logger.info(f"跳过 {skipped_downloaded} 个已下载的视频")
 
         if not videos_to_download:
             return {
@@ -618,7 +632,7 @@ class VideoDownloader:
             'title': info.get('title'),
             'uploader': info.get('uploader') or info.get('channel'),
             'total': len(results),
-            'skipped': skipped,
+            'skipped': skipped_downloaded,
             'videos': results,
             'download_dir': self.download_dir,
         }

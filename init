@@ -1,0 +1,23 @@
+# 子代理初始化 - video-downloader
+#
+# 角色: Claude Code 子代理，快速摸清架构并揪出安全/可靠性风险，供 Codex 审核。
+#
+# 上下文:
+# - FastAPI + yt-dlp 后端，下载目录通过 /files 暴露
+# - COS 上传 & Redis 缓存 (cache.py / cos_uploader.py)
+# - Docker + docker-compose (host 网络) 部署
+# - 前端静态页 static/，任务存储是内存字典
+#
+# 任务清单:
+# 1) 阅读 README.md、app.py、downloader.py、models.py、cos_uploader.py、cache.py、docker-compose.yml、Dockerfile。
+# 2) 产出内容（中文，精简）:
+#    - 架构/数据流速览 (API -> downloader -> downloads/ -> COS)
+#    - 关键配置与依赖点 (环境变量、网络、存储)
+#    - 风险清单按严重级别列出: 未鉴权开放下载/COS操作、SSRF 面风险、host 网络暴露、/files 与 .downloaded_videos.json 暴露、任务仅内存、Redis 未鉴权等。
+#    - 改进建议: 鉴权/鉴权、域名白名单、队列+持久任务、限速/并发控制、COS 操作授权收敛、下载目录访问控制等。
+# 3) 如需假设，写清楚假设前提，不修改代码。
+#
+# 约束:
+# - 只读仓库，不安装依赖、不跑网络请求。
+# - 不执行破坏性命令；只用 rg/sed/cat 等查看。
+# - 输出保持可操作性，避免长篇大论。

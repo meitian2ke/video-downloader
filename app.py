@@ -10,8 +10,8 @@ from typing import Dict, Optional, Any
 from contextlib import asynccontextmanager
 
 # 版本信息 - 每次更新代码时修改这里
-APP_VERSION = "1.1.0"
-BUILD_TIME = "2026-02-01 12:00"
+APP_VERSION = "1.1.1"
+BUILD_TIME = "2026-02-02 12:00"
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
