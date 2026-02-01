@@ -3,11 +3,12 @@ services:
     image: redis:7-alpine
     container_name: video-downloader-redis
     network_mode: host
+    command: redis-server --port 6380
     restart: unless-stopped
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-p", "6380", "ping"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -30,7 +31,7 @@ services:
       - HOST=0.0.0.0
       - PORT=8081
       - REDIS_HOST=127.0.0.1
-      - REDIS_PORT=6379
+      - REDIS_PORT=6380
       - http_proxy=http://127.0.0.1:7890
       - https_proxy=http://127.0.0.1:7890
       - COS_SECRET_ID=${COS_SECRET_ID}
