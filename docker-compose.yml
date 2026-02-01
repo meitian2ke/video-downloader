@@ -1,10 +1,26 @@
 services:
+  redis:
+    image: redis:7-alpine
+    container_name: video-downloader-redis
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
   video-downloader:
     build:
       context: .
       dockerfile: Dockerfile
     image: video-downloader:latest
     container_name: video-downloader
+    depends_on:
+      redis:
+        condition: service_healthy
     # 使用 host 网络模式，共享宿主机网络
     network_mode: host
     volumes:
@@ -13,6 +29,8 @@ services:
       - DOWNLOAD_DIR=/app/downloads
       - HOST=0.0.0.0
       - PORT=8081
+      - REDIS_HOST=127.0.0.1
+      - REDIS_PORT=6379
       - http_proxy=http://127.0.0.1:7890
       - https_proxy=http://127.0.0.1:7890
       - COS_SECRET_ID=${COS_SECRET_ID}
@@ -25,3 +43,6 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+
+volumes:
+  redis_data:
